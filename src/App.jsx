@@ -6,6 +6,7 @@ import QuizCard from './components/QuizCard';
 import RoundSummary from './components/RoundSummary';
 import HighScores from './components/HighScores';
 import MasteryScreen from './components/MasteryScreen';
+import StageDowngradeMessage from './components/StageDowngradeMessage';
 import SafeIcon from './common/SafeIcon';
 import { languages } from './data/languages';
 import { SpacedRepetitionManager } from './utils/spacedRepetition';
@@ -28,24 +29,22 @@ function App() {
     newWords: 0,
     partiallyMastered: 0,
     fullyMastered: 0,
-    totalResponseTime: 0
+    totalResponseTime: 0,
+    responses: [] // Track individual response times
   });
   const [showHighScores, setShowHighScores] = useState(false);
   const [highScores, setHighScores] = useState([]);
   const [masteredWord, setMasteredWord] = useState(null);
-  const [progress, setProgress] = useState({
-    bronze: 0,
-    silver: 0,
-    gold: 0
-  });
-
+  const [stageDowngrade, setStageDowngrade] = useState(null);
+  const [progress, setProgress] = useState({ bronze: 0, silver: 0, gold: 0 });
   const [srManager] = useState(new SpacedRepetitionManager());
   const [audioManager] = useState(new AudioManager());
+  const [waitingForDowngradeMessage, setWaitingForDowngradeMessage] = useState(false);
 
   // Stage names mapping
   const stageNames = {
     1: 'Duo Pick',
-    2: 'Trio Choice', 
+    2: 'Trio Choice',
     3: 'Quad Quest',
     4: 'Speedy Four',
     5: 'Audio Duo',
@@ -113,10 +112,10 @@ function App() {
 
   const generateQuiz = (word, stage) => {
     const allWords = languages[selectedLanguage].words[selectedLevel];
-    
+
     // Determine number of options and behavior based on stage
     let numOptions, timeLimit = null, audioMode = false, useRandomWords = false, useSimilarSounds = false;
-    
+
     switch (stage) {
       case 1: // Duo Pick
         numOptions = 2;
@@ -156,13 +155,13 @@ function App() {
       default:
         numOptions = 2;
     }
-    
+
     // Create incorrect options based on stage
     let incorrectOptions = [];
-    
+
     if (useSimilarSounds) {
-      // Stage 9: Use similar sounding words
-      const similarWords = getSimilarSounds(word.english, numOptions - 1);
+      // Stage 9: Use similar sounding words to the TRANSLATION (answer), not the question
+      const similarWords = getSimilarSounds(word.translation, numOptions - 1);
       incorrectOptions = similarWords.map(w => w.translation || w.english);
     } else if (useRandomWords) {
       // Stage 8: Use random words from the language (mix all levels)
@@ -181,9 +180,9 @@ function App() {
         .slice(0, numOptions - 1)
         .map(w => w.translation);
     }
-    
+
     let options, audioOptions, correctAnswer, correctAnswerIndex;
-    
+
     if (audioMode) {
       // Create all options (correct + incorrect)
       const allOptions = [word.translation, ...incorrectOptions];
@@ -206,11 +205,12 @@ function App() {
       // Regular mode - create shuffled options array
       options = [word.translation, ...incorrectOptions]
         .sort(() => Math.random() - 0.5);
+      
       audioOptions = [];
       correctAnswer = word.translation;
       correctAnswerIndex = options.findIndex(option => option === word.translation);
     }
-    
+
     return {
       question: word.english,
       options,
@@ -227,12 +227,11 @@ function App() {
 
   const startRound = () => {
     const wordsToReview = srManager.getWordsForReview(
-      languages[selectedLanguage].words[selectedLevel], 
+      languages[selectedLanguage].words[selectedLevel],
       20
     );
-    
+
     let selectedWords = [];
-    
     if (wordsToReview.length >= 20) {
       selectedWords = wordsToReview.slice(0, 20);
     } else {
@@ -244,7 +243,7 @@ function App() {
       
       selectedWords = [...wordsToReview, ...remainingWords].slice(0, 20);
     }
-    
+
     setRoundWords(selectedWords);
     setCurrentWordIndex(0);
     setRoundStats({
@@ -253,24 +252,39 @@ function App() {
       newWords: 0,
       partiallyMastered: 0,
       fullyMastered: 0,
-      totalResponseTime: 0
+      totalResponseTime: 0,
+      responses: []
     });
-    
     setGameState('quiz');
   };
 
   const handleAnswer = (correct, responseTime = 3) => {
     const currentWord = roundWords[currentWordIndex];
     const wordData = srManager.updateWord(currentWord.english, correct);
-    
-    // Update stats
+
+    // Convert responseTime from milliseconds to seconds if needed
+    const responseTimeInSeconds = responseTime > 100 ? responseTime / 1000 : responseTime;
+
+    // Update stats with corrected timing
     setRoundStats(prev => ({
       ...prev,
       correctAnswers: prev.correctAnswers + (correct ? 1 : 0),
       totalWords: prev.totalWords + 1,
-      totalResponseTime: prev.totalResponseTime + responseTime
+      totalResponseTime: prev.totalResponseTime + responseTimeInSeconds,
+      responses: [...prev.responses, responseTimeInSeconds]
     }));
-    
+
+    // Show stage downgrade message if word moved down
+    if (wordData.stageChanged && wordData.stageDirection === 'down') {
+      setStageDowngrade({
+        word: currentWord,
+        previousStage: wordData.previousStage,
+        newStage: wordData.stage
+      });
+      setWaitingForDowngradeMessage(true);
+      return; // Don't proceed to next question yet
+    }
+
     // Check if word was mastered (stage 8 is mastery, but can continue to stage 9)
     if (wordData.stage === 8 && !wordData.mastered) {
       wordData.mastered = true;
@@ -279,13 +293,40 @@ function App() {
       audioManager.play('levelUp');
       return;
     }
-    
+
     // Move to next word or end round
+    proceedToNextQuestion();
+
+    // Save progress
+    srManager.save();
+  };
+
+  const proceedToNextQuestion = () => {
     if (currentWordIndex < roundWords.length - 1) {
       setCurrentWordIndex(prev => prev + 1);
     } else {
       endRound();
     }
+  };
+
+  const handleDowngradeMessageComplete = () => {
+    setStageDowngrade(null);
+    setWaitingForDowngradeMessage(false);
+    
+    // Check if word was mastered after showing downgrade message
+    const currentWord = roundWords[currentWordIndex];
+    const wordData = srManager.getWordData(currentWord.english);
+    
+    if (wordData.stage === 8 && !wordData.mastered) {
+      wordData.mastered = true;
+      setMasteredWord(currentWord);
+      setGameState('mastery');
+      audioManager.play('levelUp');
+      return;
+    }
+
+    // Now proceed to next question
+    proceedToNextQuestion();
     
     // Save progress
     srManager.save();
@@ -295,12 +336,17 @@ function App() {
     // Calculate final stats
     const allWords = languages[selectedLanguage].words[selectedLevel];
     const finalStats = srManager.getStats(allWords);
-    
-    // Calculate scores with new formula
+
+    // Calculate scores with corrected formula
     const accuracy = Math.round((roundStats.correctAnswers / roundStats.totalWords) * 100);
-    const avgResponseTime = roundStats.totalResponseTime / roundStats.totalWords;
-    const totalTime = roundStats.totalResponseTime;
     
+    // Fix timing calculations - ensure we're working in seconds
+    const avgResponseTime = roundStats.responses.length > 0 
+      ? roundStats.responses.reduce((sum, time) => sum + time, 0) / roundStats.responses.length
+      : 3;
+    
+    const totalTime = roundStats.responses.reduce((sum, time) => sum + time, 0);
+
     // New scoring algorithm (out of 1000)
     // 60% accuracy, 20% speed (lower is better), 20% total time (lower is better)
     const accuracyScore = (accuracy / 100) * 600; // 0-600 points
@@ -312,7 +358,7 @@ function App() {
     const timeScore = Math.max(0, 200 - (Math.max(0, totalTime - 20) * 2)); // 0-200 points
     
     const totalScore = Math.round(accuracyScore + speedScore + timeScore);
-    
+
     const updatedStats = {
       ...roundStats,
       ...finalStats,
@@ -324,18 +370,18 @@ function App() {
       timeScore: Math.round(timeScore),
       totalScore
     };
-    
+
     setRoundStats(updatedStats);
-    
+
     // Save high score
     saveHighScore(updatedStats);
-    
+
     // Update progress
     const newProgress = { ...progress };
     newProgress[selectedLevel] = finalStats.fullyMastered;
     setProgress(newProgress);
     saveProgress();
-    
+
     setGameState('round-summary');
   };
 
@@ -345,13 +391,13 @@ function App() {
   };
 
   useEffect(() => {
-    if (gameState === 'quiz' && roundWords.length > 0) {
+    if (gameState === 'quiz' && roundWords.length > 0 && !waitingForDowngradeMessage) {
       const currentWord = roundWords[currentWordIndex];
       const wordData = srManager.getWordData(currentWord.english);
       const quiz = generateQuiz(currentWord, wordData.stage);
       setCurrentQuiz(quiz);
     }
-  }, [gameState, currentWordIndex, roundWords]);
+  }, [gameState, currentWordIndex, roundWords, waitingForDowngradeMessage]);
 
   const resetGame = () => {
     setGameState('language-select');
@@ -361,6 +407,8 @@ function App() {
     setRoundWords([]);
     setCurrentWordIndex(0);
     setMasteredWord(null);
+    setStageDowngrade(null);
+    setWaitingForDowngradeMessage(false);
   };
 
   return (
@@ -375,7 +423,7 @@ function App() {
           >
             Language Master
           </motion.h1>
-          
+
           <div className="flex space-x-4">
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -386,7 +434,7 @@ function App() {
               <SafeIcon icon={FiTrophy} className="w-5 h-5 text-gold-500" />
               <span className="font-medium text-gray-700">High Scores</span>
             </motion.button>
-            
+
             {gameState !== 'language-select' && (
               <motion.button
                 whileHover={{ scale: 1.05 }}
@@ -439,7 +487,7 @@ function App() {
             </motion.div>
           )}
 
-          {gameState === 'quiz' && currentQuiz && (
+          {gameState === 'quiz' && currentQuiz && !waitingForDowngradeMessage && (
             <motion.div
               key="quiz"
               initial={{ opacity: 0, y: 20 }}
@@ -451,13 +499,13 @@ function App() {
                   Question {currentWordIndex + 1} of 20
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                  <div 
+                  <div
                     className="h-2 rounded-full bg-gradient-to-r from-purple-400 to-pink-400 transition-all duration-300"
                     style={{ width: `${((currentWordIndex + 1) / 20) * 100}%` }}
                   />
                 </div>
               </div>
-              
+
               <QuizCard
                 question={currentQuiz.question}
                 options={currentQuiz.options}
@@ -512,6 +560,15 @@ function App() {
                 endRound();
               }
             }}
+          />
+        )}
+
+        {stageDowngrade && (
+          <StageDowngradeMessage
+            word={stageDowngrade.word}
+            previousStage={stageDowngrade.previousStage}
+            newStage={stageDowngrade.newStage}
+            onComplete={handleDowngradeMessageComplete}
           />
         )}
       </AnimatePresence>

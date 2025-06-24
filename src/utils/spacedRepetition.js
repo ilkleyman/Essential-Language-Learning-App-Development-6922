@@ -27,18 +27,20 @@ export class SpacedRepetitionManager {
   // Update word after answer
   updateWord(wordId, correct) {
     const word = this.getWordData(wordId);
+    const previousStage = word.stage;
+    
     word.totalAttempts++;
     word.lastReviewed = Date.now();
 
     if (correct) {
       word.correctAttempts++;
       word.correctStreak++;
-      
+
       // Always advance stage when answer is correct (up to stage 9)
       if (word.stage < 9) {
         word.stage = Math.min(word.stage + 1, 9);
       }
-      
+
       // Mark as mastered at stage 8 (but can continue to stage 9 for retention)
       if (word.stage >= 8) {
         word.mastered = true;
@@ -60,15 +62,15 @@ export class SpacedRepetitionManager {
       word.easiness = Math.max(1.3, word.easiness + (0.1 - (5 - 4) * (0.08 + (5 - 4) * 0.02)));
     } else {
       word.correctStreak = 0;
-      
+
       // Move back one stage on incorrect answer (but not below 1)
       word.stage = Math.max(1, word.stage - 1);
-      
+
       // If moved back from stage 8+, no longer considered mastered
       if (word.stage < 8) {
         word.mastered = false;
       }
-      
+
       // Reset timing
       word.repetitions = 0;
       word.interval = 1;
@@ -76,7 +78,13 @@ export class SpacedRepetitionManager {
       word.easiness = Math.max(1.3, word.easiness - 0.2);
     }
 
-    return word;
+    // Return both the word data and stage change info
+    return {
+      ...word,
+      stageChanged: previousStage !== word.stage,
+      previousStage,
+      stageDirection: word.stage > previousStage ? 'up' : word.stage < previousStage ? 'down' : 'none'
+    };
   }
 
   // Get words that need review
@@ -87,10 +95,7 @@ export class SpacedRepetitionManager {
     allWords.forEach(word => {
       const wordData = this.getWordData(word.english);
       if (wordData.nextReview <= now) {
-        wordsNeedingReview.push({
-          ...word,
-          wordData
-        });
+        wordsNeedingReview.push({ ...word, wordData });
       }
     });
 
@@ -98,7 +103,6 @@ export class SpacedRepetitionManager {
     wordsNeedingReview.sort((a, b) => {
       const aOverdue = now - a.wordData.nextReview;
       const bOverdue = now - b.wordData.nextReview;
-      
       if (aOverdue !== bOverdue) {
         return bOverdue - aOverdue; // More overdue first
       }
@@ -117,8 +121,14 @@ export class SpacedRepetitionManager {
       totalWords: allWords.length,
       averageStage: 0,
       totalStages: 0,
-      journeyProgress: 0
+      journeyProgress: 0,
+      stageDistribution: {}
     };
+
+    // Initialize stage distribution
+    for (let i = 1; i <= 9; i++) {
+      stats.stageDistribution[i] = 0;
+    }
 
     let totalProgress = 0;
 
@@ -134,7 +144,8 @@ export class SpacedRepetitionManager {
       }
 
       stats.totalStages += wordData.stage;
-      
+      stats.stageDistribution[wordData.stage]++;
+
       // Calculate journey progress (stage / 9 * 100) for each word
       totalProgress += (wordData.stage / 9) * 100;
     });

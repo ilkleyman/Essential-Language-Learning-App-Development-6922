@@ -1,8 +1,7 @@
 // Utility functions for generating similar sounding words and random words
-
 export const generateSimilarSoundingWords = (targetWord, allWords, count = 3) => {
   const target = targetWord.toLowerCase();
-  
+
   // Common sound patterns for similarity matching
   const getSoundPatterns = (word) => {
     const patterns = [];
@@ -32,14 +31,14 @@ export const generateSimilarSoundingWords = (targetWord, allWords, count = 3) =>
   };
 
   const targetPatterns = getSoundPatterns(target);
-  
+
   // Score words by similarity
   const scoredWords = allWords
     .filter(word => word.english.toLowerCase() !== target)
     .map(word => {
       const wordPatterns = getSoundPatterns(word.english.toLowerCase());
       let score = 0;
-      
+
       // Check for pattern matches
       targetPatterns.forEach(pattern => {
         if (pattern.length >= 2) {
@@ -50,12 +49,12 @@ export const generateSimilarSoundingWords = (targetWord, allWords, count = 3) =>
           });
         }
       });
-      
+
       // Bonus for similar length
       const lengthDiff = Math.abs(target.length - word.english.length);
       if (lengthDiff <= 1) score += 2;
       if (lengthDiff <= 2) score += 1;
-      
+
       // Bonus for shared letters in same positions
       const minLength = Math.min(target.length, word.english.length);
       for (let i = 0; i < minLength; i++) {
@@ -63,7 +62,7 @@ export const generateSimilarSoundingWords = (targetWord, allWords, count = 3) =>
           score += 1;
         }
       }
-      
+
       return { word, score };
     })
     .filter(item => item.score > 0)
@@ -82,35 +81,29 @@ export const generateRandomWords = (excludeWord, allWords, count = 3) => {
 
 // Predefined similar sounding word groups for common words
 export const similarSoundingGroups = {
-  // Car-like sounds
-  car: ['bar', 'far', 'jar', 'star', 'card', 'cart', 'care', 'core'],
+  // Hungarian words - similar sounds to TRANSLATIONS
+  'szia': ['sia', 'zia', 'szea', 'szila', 'sziá'],
+  'viszlát': ['vislát', 'viszát', 'vislát', 'viszlót', 'viszlet'],
+  'kérem': ['kérek', 'kérlek', 'kérem', 'kérém', 'kérom'],
+  'köszönöm': ['köszönet', 'köszönök', 'köszönöd', 'köszönjük', 'köszönöm'],
+  'igen': ['igaz', 'igén', 'iged', 'igék', 'igér'],
+  'nem': ['nép', 'név', 'nez', 'nekem', 'neki'],
+  'elnézést': ['elnéz', 'elnézés', 'elnézet', 'elnéző', 'elnézett'],
+  'sajnálom': ['sajnál', 'sajnos', 'sajná', 'sajnálod', 'sajnálok'],
+  'hol': ['hó', 'húr', 'hús', 'hol', 'holt'],
+  'mennyibe': ['mennyi', 'menny', 'menybe', 'mennyit', 'mennybe'],
   
-  // Cat-like sounds  
-  cat: ['bat', 'hat', 'rat', 'sat', 'mat', 'pat', 'fat', 'chat'],
-  
-  // House-like sounds
-  house: ['mouse', 'horse', 'course', 'hours', 'houses', 'housing'],
-  
-  // Water-like sounds
-  water: ['winter', 'waiter', 'weather', 'wetter', 'walter', 'wonder'],
-  
-  // Food-like sounds
-  food: ['mood', 'good', 'wood', 'hood', 'stood', 'foot', 'fool'],
-  
-  // Hello-like sounds
-  hello: ['yellow', 'bellow', 'fellow', 'hollow', 'pillow', 'willow'],
-  
-  // Thank-like sounds
-  thank: ['bank', 'tank', 'rank', 'blank', 'think', 'thick'],
-  
-  // Please-like sounds
-  please: ['peace', 'place', 'plane', 'plate', 'play', 'plaza'],
-  
-  // Where-like sounds
-  where: ['wear', 'were', 'care', 'dare', 'fair', 'hair', 'pair'],
-  
-  // Help-like sounds
-  help: ['kelp', 'yelp', 'held', 'hell', 'helm', 'hemp']
+  // Spanish words - similar sounds to TRANSLATIONS
+  'hola': ['cola', 'bola', 'lola', 'hoja', 'hora'],
+  'adiós': ['adios', 'dios', 'arios', 'varios', 'radios'],
+  'gracias': ['gracia', 'gracioso', 'graciosa', 'gracias', 'garcia'],
+  'sí': ['si', 'así', 'casi', 'psi', 'ski'],
+  'no': ['yo', 'lo', 'do', 'so', 'go'],
+  'perdón': ['perdí', 'perdió', 'perdona', 'perdon', 'perdone'],
+  'dónde': ['donde', 'conde', 'ronde', 'fonde', 'ponde'],
+  'cuánto': ['cuanto', 'cuando', 'cuatro', 'cuarto', 'canto'],
+  'quiero': ['quero', 'quieto', 'quiebro', 'quiera', 'quieres'],
+  'agua': ['aguda', 'aguá', 'aguja', 'aguarda', 'aguanta']
 };
 
 export const getSimilarSounds = (word, count = 3) => {
@@ -132,34 +125,51 @@ const generateAlgorithmicSimilarWords = (word, count) => {
   const base = word.toLowerCase();
   const similar = [];
   
-  // Generate rhyming variations
-  const endings = ['ar', 'er', 'or', 'ing', 'ed', 'ly', 'tion', 'ness'];
-  const beginnings = ['pre', 'un', 'de', 're', 'over', 'under', 'out'];
+  // Generate variations by changing vowels
+  const vowels = ['a', 'e', 'i', 'o', 'u'];
+  const baseVowels = base.match(/[aeiou]/g) || [];
   
-  // Try different endings
-  if (base.length > 2) {
-    const root = base.slice(0, -2);
-    endings.forEach(ending => {
-      if (similar.length < count) {
+  if (baseVowels.length > 0) {
+    // Replace each vowel with other vowels
+    for (let i = 0; i < Math.min(count, 5); i++) {
+      let variation = base;
+      const randomVowelIndex = Math.floor(Math.random() * baseVowels.length);
+      const originalVowel = baseVowels[randomVowelIndex];
+      const newVowel = vowels[Math.floor(Math.random() * vowels.length)];
+      
+      variation = variation.replace(originalVowel, newVowel);
+      
+      if (variation !== base && !similar.find(s => s.english === variation)) {
         similar.push({
-          english: root + ending,
-          translation: root + ending,
-          pronunciation: root + ending
+          english: variation,
+          translation: variation,
+          pronunciation: variation
         });
       }
-    });
+    }
   }
   
-  // Try different beginnings
-  beginnings.forEach(beginning => {
-    if (similar.length < count) {
+  // Generate variations by changing consonants
+  const consonants = ['b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'm', 'n', 'p', 'r', 's', 't', 'v', 'w', 'z'];
+  
+  while (similar.length < count) {
+    let variation = base;
+    const randomIndex = Math.floor(Math.random() * variation.length);
+    const randomConsonant = consonants[Math.floor(Math.random() * consonants.length)];
+    
+    variation = variation.substring(0, randomIndex) + randomConsonant + variation.substring(randomIndex + 1);
+    
+    if (variation !== base && !similar.find(s => s.english === variation)) {
       similar.push({
-        english: beginning + base,
-        translation: beginning + base,
-        pronunciation: beginning + base
+        english: variation,
+        translation: variation,
+        pronunciation: variation
       });
     }
-  });
+    
+    // Prevent infinite loop
+    if (similar.length >= 10) break;
+  }
   
   return similar.slice(0, count);
 };
